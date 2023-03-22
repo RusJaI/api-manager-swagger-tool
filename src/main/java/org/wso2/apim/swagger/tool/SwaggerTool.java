@@ -20,8 +20,10 @@
 
 package org.wso2.apim.swagger.tool;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.parser.SwaggerParser;
@@ -258,8 +260,12 @@ public class SwaggerTool {
                             swaggerParser.parse(swagger);
                             log.error(errorMessageBuilder.toString());
                         } catch (Exception e) {
-                            errorMessageBuilder.append(", Cause by: ").append(e.getMessage());
-                            log.error(errorMessageBuilder.toString());
+                            if (e.getMessage().contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
+                                logRemoteReferenceIssues(swagger);
+                            } else {
+                                errorMessageBuilder.append(", Cause by: ").append(e.getMessage());
+                                log.error(errorMessageBuilder.toString());
+                            }
                         }
                     } else {
                         if (isSchemaMissing(message)) {
@@ -302,8 +308,6 @@ public class SwaggerTool {
         return isSwaggerMissing;
     }
 
-    String regexToExtractSchemaName = "(?<=components\\/schemas)[^\\s]*";
-
     private static boolean isSchemaMissing(String errorMessage) {
         return errorMessage.contains(Constants.SCHEMA_REF_PATH) && errorMessage.contains("is missing");
     }
@@ -320,7 +324,9 @@ public class SwaggerTool {
             if (validationLevel == 1 || validationLevel == 2) {
                 for (String message : parseResult.getMessages()) {
                     StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
-                    if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
+                    if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
+                        logRemoteReferenceIssues(swagger);
+                    } else if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
                         errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
                                 .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
                         log.error(errorMessageBuilder.toString());
@@ -363,5 +369,65 @@ public class SwaggerTool {
             }
         }
         return isOpenAPIMissing;
+    }
+
+    /**
+     * This method will log the remote references in the given Swagger or OpenAPI definition.
+     * @param apiDefinition Swagger or OpenAPI definition
+     */
+    public static void logRemoteReferenceIssues(String apiDefinition) {
+        log.warn("Validate the following remote references and make sure that they are valid and accessible:");
+
+        // Parse the Swagger or OpenAPI definition and extract the remote references by picking
+        // the values of the $ref ke
+        ObjectMapper mapper;
+        if (apiDefinition.trim().startsWith("{")) {
+            mapper = ObjectMapperFactory.createJson();
+        } else {
+            mapper = ObjectMapperFactory.createYaml();
+        }
+
+        JsonNode rootNode;
+        try {
+            rootNode = mapper.readTree(apiDefinition);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
+        List<JsonNode> refValues = findRefValues(rootNode);
+
+        for (JsonNode refValue : refValues) {
+            String remoteReference = refValue.toString();
+
+            // If schema reference starts with #/components/schemas/ (OAS 3 ref objects) or #/definitions/ (Swagger ref objects), it is a local reference.
+            // Hence, if reference does not start with a "#/", it is a remote reference.
+            if (!remoteReference.startsWith("\"#/")) {
+                log.warn(refValue.toString());
+            }
+        }
+    }
+
+    /**
+     * This method will recursively traverse the given JSON node and return a list of all the $ref values.
+     * @param node JSON node
+     * @return List of $ref values
+     */
+    public static List<JsonNode> findRefValues(JsonNode node) {
+        List<JsonNode> refValues = new ArrayList<>();
+
+        if (node instanceof ObjectNode) {
+            ObjectNode objectNode = (ObjectNode) node;
+            objectNode.fields().forEachRemaining(entry -> {
+                if (entry.getKey().equals("$ref")) {
+                    refValues.add(entry.getValue());
+                } else {
+                    refValues.addAll(findRefValues(entry.getValue()));
+                }
+            });
+        } else if (node instanceof ArrayNode) {
+            ArrayNode arrayNode = (ArrayNode) node;
+            arrayNode.forEach(element -> refValues.addAll(findRefValues(element)));
+        }
+
+        return refValues;
     }
 }
