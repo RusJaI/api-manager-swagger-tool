@@ -25,14 +25,23 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.swagger.models.HttpMethod;
+import io.swagger.models.Operation;
+import io.swagger.models.Swagger;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.parser.SwaggerParser;
+import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.wso2.carbon.apimgt.api.APIManagementException;
+import org.wso2.carbon.apimgt.api.model.URITemplate;
+import org.wso2.carbon.apimgt.impl.definitions.OAS2Parser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -40,8 +49,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 /**
  * Swagger Validation Tool Main Class: This Class will work as a CLI tool to validate the Swagger 2 and OpenAPI
@@ -121,6 +129,7 @@ public class SwaggerTool {
     /**
      * @param swaggerFileContent swagger file content to be validated
      * @param validationLevel    validation level [0,1,2]
+     *  relaxedValidation = 0, API Manager 4.2.0 validation =1, full validation =2
      */
     public static void validateSwaggerContent(String swaggerFileContent, int validationLevel) {
         List<Object> swaggerTypeAndName = getSwaggerVersion(swaggerFileContent);
@@ -242,10 +251,10 @@ public class SwaggerTool {
         options.setFlatten(true);
         options.setResolveFully(true);
         SwaggerParseResult parseAttemptForV2 = parser.readContents(swagger, new ArrayList<>(), options);
+        StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
         if (parseAttemptForV2.getMessages().size() > 0) {
              if (validationLevel == 1 || validationLevel == 2) {
                 for (String message : parseAttemptForV2.getMessages()) {
-                    StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
                     if (message.contains(Constants.SWAGGER_IS_MISSING_MSG)) {
                         errorMessageBuilder.append(Constants.INVALID_OAS2_FOUND_ERROR_CODE)
                                 .append(", Error: ").append(Constants.INVALID_OAS2_FOUND_ERROR_MESSAGE)
@@ -293,7 +302,52 @@ public class SwaggerTool {
                 totalMalformedSwaggerFiles++;
             }
         } else {
+            boolean didManualParseChecksFail = false;
+            // Check whether the given OpenAPI definition contains empty resource paths
+            // We are checking this manually since the Swagger parser does not throw an error for this
+            // Which is a known issue of Swagger 2.0 parser
+            Set<org.wso2.carbon.apimgt.api.model.URITemplate> uriTemplates = null;
+            OAS2Parser oas2Parser = new OAS2Parser();
+            try {
+                uriTemplates = oas2Parser.getURITemplates(swagger);
+            } catch (APIManagementException e) {
+                throw new RuntimeException(e);
+            }
+            if (uriTemplates == null) {
+                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                        .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
+                        .append(", Swagger Error: ").append("Resource paths cannot be empty " +
+                                "in the swagger definition");
+                log.error(errorMessageBuilder.toString());
+                didManualParseChecksFail = true;
+            } else {
+                for (URITemplate uriTemplate : uriTemplates) {
+                    if (uriTemplate.getUriTemplate().isEmpty()) {
+                        errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                                .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
+                                .append(", Swagger Error: ").append("Resource paths cannot be empty " +
+                                        "in the swagger definition");
+                        log.error(errorMessageBuilder.toString());
+                        didManualParseChecksFail = true;
+                    }
+                }
+            }
+
+            // Check for multiple resource paths with and without trailing slashes.
+            // If there are two resource paths with the same name, one with and one without trailing slashes,
+            // it will be considered an error since those are considered as one resource in the API deployment.
             if (parseAttemptForV2.getOpenAPI() != null) {
+                if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
+                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                            .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
+                            .append(", Swagger Error: ").append("Swagger definition cannot have " +
+                                    "multiple resource paths with the same name");
+                    log.error(errorMessageBuilder.toString());
+                    didManualParseChecksFail = true;
+                };
+            }
+
+            if ((!didManualParseChecksFail) && parseAttemptForV2.getOpenAPI() != null) {
                 log.info("Swagger file is valid");
                 validationSuccessFileCount++;
             } else {
@@ -303,9 +357,100 @@ public class SwaggerTool {
             }
         }
         if (isValidForAPIM) {
-            log.info("Swagger file will be accepted by the APIM 4.0.0 ");
+            log.info("Swagger file will be accepted by the APIM 4.2.0 ");
         }
         return isSwaggerMissing;
+    }
+
+
+    /**
+     * This method will validate the OAS definition against the resource paths with trailing slashes.
+     *
+     * @param openAPI            OpenAPI object
+     * @param swagger         Swagger object
+     * @return isSwaggerValid boolean
+     */
+    public static boolean isValidWithPathsWithTrailingSlashes(OpenAPI openAPI, Swagger swagger) {
+        Map<String, ?> pathItems = null;
+        if (openAPI != null) {
+            pathItems = openAPI.getPaths();
+        } else if (swagger != null) {
+            pathItems = swagger.getPaths();
+        }
+        if (pathItems != null) {
+            for (String path : pathItems.keySet()) {
+                if (path.endsWith("/")) {
+                    String newPath = path.substring(0, path.length() - 1);
+                    if (pathItems.containsKey(newPath)) {
+                        Object pathItem = pathItems.get(newPath);
+                        Object newPathItem = pathItems.get(path);
+
+                        if (pathItem instanceof PathItem && newPathItem instanceof PathItem) {
+                            if (!validateOAS3Paths((PathItem) pathItem, (PathItem) newPathItem)) {
+                                return false;
+                            }
+                        } else if (pathItem instanceof io.swagger.models.Path && newPathItem instanceof io.swagger.models.Path) {
+                            if (!validateOAS2Paths((io.swagger.models.Path) pathItem, (PathItem) newPathItem)) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    private static boolean validateOAS3Paths(PathItem pathItem, PathItem newPathItem) {
+
+        if (pathItem.getGet() != null && newPathItem.getGet() != null) {
+            return false;
+        }
+        if (pathItem.getPost() != null && newPathItem.getPost() != null) {
+            return false;
+        }
+        if (pathItem.getPut() != null && newPathItem.getPut() != null) {
+            return false;
+        }
+        if (pathItem.getPatch() != null && newPathItem.getPatch() != null) {
+            return false;
+        }
+        if (pathItem.getDelete() != null && newPathItem.getDelete() != null) {
+            return false;
+        }
+        if (pathItem.getHead() != null && newPathItem.getHead() != null) {
+            return false;
+        }
+        if (pathItem.getOptions() != null && newPathItem.getOptions() != null) {
+            return false;
+        }
+        return true;
+    }
+
+    private static boolean validateOAS2Paths(io.swagger.models.Path pathItem, PathItem newPathItem) {
+
+        if (pathItem.getGet() != null && newPathItem.getGet() != null) {
+            return false;
+        }
+        if (pathItem.getPost() != null && newPathItem.getPost() != null) {
+            return false;
+        }
+        if (pathItem.getPut() != null && newPathItem.getPut() != null) {
+            return false;
+        }
+        if (pathItem.getPatch() != null && newPathItem.getPatch() != null) {
+            return false;
+        }
+        if (pathItem.getDelete() != null && newPathItem.getDelete() != null) {
+            return false;
+        }
+        if (pathItem.getHead() != null && newPathItem.getHead() != null) {
+            return false;
+        }
+        if (pathItem.getOptions() != null && newPathItem.getOptions() != null) {
+            return false;
+        }
+        return true;
     }
 
     private static boolean isSchemaMissing(String errorMessage) {
