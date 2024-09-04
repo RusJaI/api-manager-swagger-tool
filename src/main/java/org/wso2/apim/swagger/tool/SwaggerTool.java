@@ -308,6 +308,30 @@ public class SwaggerTool {
             // Which is a known issue of Swagger 2.0 parser
             Set<org.wso2.carbon.apimgt.api.model.URITemplate> uriTemplates = null;
             OAS2Parser oas2Parser = new OAS2Parser();
+            Swagger swaggerObject = new SwaggerParser().read(swagger);
+
+            if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
+                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                        .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
+                        .append(", Swagger Error: ").append("Resource paths cannot be empty " +
+                                "in the swagger definition");
+                log.error(errorMessageBuilder.toString());
+                didManualParseChecksFail = true;
+            } else {
+                Map <String, io.swagger.models.Path> paths = swaggerObject.getPaths();
+                for (String key : paths.keySet()) {
+                    Map <io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
+                            paths.get(key).getOperationMap();
+                    for (HttpMethod httpMethod : operationsMap.keySet()) {
+                        if (operationsMap.get(httpMethod) == null) {
+                            errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                                    .append(", Error: ").append(Constants.EMPTY_OPERATION_OBJECT_ERROR_MESSAGE)
+                                    .append(", Swagger Error: ").append("Operation objects cannot be empty " +
+                                            "in the swagger definition");
+                        }
+                    }
+                }
+            }
             try {
                 uriTemplates = oas2Parser.getURITemplates(swagger);
             } catch (APIManagementException e) {
