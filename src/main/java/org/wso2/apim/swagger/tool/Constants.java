@@ -37,8 +37,9 @@ public class Constants {
             "The provided definition does not specify a valid version field.";
 
     public static final String UNABLE_TO_LOAD_REMOTE_REFERENCE = "Unable to load RELATIVE ref:";
-    public static final String EMPTY_RESOURCE_PATH_ERROR_MESSAGE = "A resource path is empty";
+    public static final String EMPTY_RESOURCE_PATH_ERROR_MESSAGE = "Empty resource paths";
     public static final String EMPTY_OPERATION_OBJECT_ERROR_MESSAGE = "An operation object is empty";
+    public static final String NO_OPERATIONS_FOUND_ERROR_MESSAGE = "No operations found for the resource path";
     public static final String MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE =
             "Multiple resource paths with the same name:";
 

@@ -26,7 +26,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.models.HttpMethod;
-import io.swagger.models.Operation;
 import io.swagger.models.Swagger;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.parser.SwaggerParser;
@@ -36,12 +35,8 @@ import io.swagger.v3.parser.ObjectMapperFactory;
 import io.swagger.v3.parser.OpenAPIV3Parser;
 import io.swagger.v3.parser.core.models.ParseOptions;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
-import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.wso2.carbon.apimgt.api.APIManagementException;
-import org.wso2.carbon.apimgt.api.model.URITemplate;
-import org.wso2.carbon.apimgt.impl.definitions.OAS2Parser;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,7 +44,9 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Swagger Validation Tool Main Class: This Class will work as a CLI tool to validate the Swagger 2 and OpenAPI
@@ -303,81 +300,75 @@ public class SwaggerTool {
             }
         } else {
             boolean didManualParseChecksFail = false;
-            // Check whether the given OpenAPI definition contains empty resource paths
-            // We are checking this manually since the Swagger parser does not throw an error for this
-            // Which is a known issue of Swagger 2.0 parser
-            Set<org.wso2.carbon.apimgt.api.model.URITemplate> uriTemplates = null;
-            OAS2Parser oas2Parser = new OAS2Parser();
-            Swagger swaggerObject = new SwaggerParser().read(swagger);
 
-            if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
-                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                        .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
-                        .append(", Swagger Error: ").append("Resource paths cannot be empty " +
-                                "in the swagger definition");
-                log.error(errorMessageBuilder.toString());
-                didManualParseChecksFail = true;
-            } else {
-                Map <String, io.swagger.models.Path> paths = swaggerObject.getPaths();
-                for (String key : paths.keySet()) {
-                    Map <io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
-                            paths.get(key).getOperationMap();
-                    for (HttpMethod httpMethod : operationsMap.keySet()) {
-                        if (operationsMap.get(httpMethod) == null) {
+            if (validationLevel == 1 || validationLevel == 2) {
+                // Check whether the given OpenAPI definition contains empty resource paths
+                // We are checking this manually since the Swagger parser does not throw an error for this
+                // Which is a known issue of Swagger 2.0 parser
+                Swagger swaggerObject = swaggerParser.parse(swagger);
+
+                if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
+                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                            .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
+                            .append(", Swagger Error: ").append("Resource paths cannot be empty " +
+                                    "in the swagger definition");
+                    log.error(errorMessageBuilder.toString());
+                    didManualParseChecksFail = true;
+                } else {
+                    Map<String, io.swagger.models.Path> paths = swaggerObject.getPaths();
+                    for (String key : paths.keySet()) {
+                        Map<io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
+                                paths.get(key).getOperationMap();
+                        if (operationsMap.size() == 0) {
                             errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                    .append(", Error: ").append(Constants.EMPTY_OPERATION_OBJECT_ERROR_MESSAGE)
-                                    .append(", Swagger Error: ").append("Operation objects cannot be empty " +
-                                            "in the swagger definition");
+                                    .append(", Error: ").append(Constants.NO_OPERATIONS_FOUND_ERROR_MESSAGE)
+                                    .append(", Swagger Error: ").append("Operations cannot be empty " +
+                                            "for a resource path");
+                            log.error(errorMessageBuilder.toString());
+                            didManualParseChecksFail = true;
+                        }
+                        //if operation object is empty, it is caught by the swagger parser
+                        for (HttpMethod httpMethod : operationsMap.keySet()) {
+                            if (operationsMap.get(httpMethod) == null) {
+                                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                                        .append(", Error: ").append(Constants.EMPTY_OPERATION_OBJECT_ERROR_MESSAGE)
+                                        .append(", Swagger Error: ").append("Operation objects cannot be empty " +
+                                                "in the swagger definition");
+                                log.error(errorMessageBuilder.toString());
+                                didManualParseChecksFail = true;
+                            }
                         }
                     }
                 }
-            }
-            try {
-                uriTemplates = oas2Parser.getURITemplates(swagger);
-            } catch (APIManagementException e) {
-                throw new RuntimeException(e);
-            }
-            if (uriTemplates == null) {
-                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                        .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
-                        .append(", Swagger Error: ").append("Resource paths cannot be empty " +
-                                "in the swagger definition");
-                log.error(errorMessageBuilder.toString());
-                didManualParseChecksFail = true;
-            } else {
-                for (URITemplate uriTemplate : uriTemplates) {
-                    if (uriTemplate.getUriTemplate().isEmpty()) {
+
+                // Check for multiple resource paths with and without trailing slashes.
+                // If there are two resource paths with the same name, one with and one without trailing slashes,
+                // it will be considered an error since those are considered as one resource in the API deployment.
+                if (parseAttemptForV2.getOpenAPI() != null) {
+                    if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
                         errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append("Resource paths cannot be empty " +
-                                        "in the swagger definition");
+                                .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
+                                .append(", Swagger Error: ").append("Swagger definition cannot have " +
+                                        "multiple resource paths with the same name");
                         log.error(errorMessageBuilder.toString());
                         didManualParseChecksFail = true;
                     }
                 }
             }
 
-            // Check for multiple resource paths with and without trailing slashes.
-            // If there are two resource paths with the same name, one with and one without trailing slashes,
-            // it will be considered an error since those are considered as one resource in the API deployment.
-            if (parseAttemptForV2.getOpenAPI() != null) {
-                if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
-                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                            .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
-                            .append(", Swagger Error: ").append("Swagger definition cannot have " +
-                                    "multiple resource paths with the same name");
-                    log.error(errorMessageBuilder.toString());
-                    didManualParseChecksFail = true;
-                };
-            }
-
-            if ((!didManualParseChecksFail) && parseAttemptForV2.getOpenAPI() != null) {
-                log.info("Swagger file is valid");
-                validationSuccessFileCount++;
-            } else {
+            if (parseAttemptForV2.getOpenAPI() == null) {
                 isValidForAPIM = false;
                 log.error(Constants.UNABLE_TO_RENDER_THE_DEFINITION_ERROR);
                 validationFailedFileCount++;
+            } else {
+                if (didManualParseChecksFail) { //becomes true only in level 1 and 2
+                    isValidForAPIM = false;
+                    log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
+                    validationFailedFileCount++;
+                } else {
+                    log.info("Swagger file is valid");
+                    validationSuccessFileCount++;
+                }
             }
         }
         if (isValidForAPIM) {
@@ -529,6 +520,8 @@ public class SwaggerTool {
                 }
             }
         } else {
+            //to catch a scenario where the parser doesn't return swagger errors and the file is not
+            // actually a swagger
             if (parseResult.getOpenAPI() != null) {
                 log.info("Swagger file is valid OpenAPI 3 definition");
                 validationSuccessFileCount++;
