@@ -59,6 +59,7 @@ public class SwaggerTool {
     static int validationSuccessFileCount = 0;
     static int totalMalformedSwaggerFiles = 0;
     static int totalPartialyPasedSwaggerFiles = 0;
+    static List<String> errorList = new ArrayList<String>();
 
     /**
      * @param args 2 parameters are supported when executing the tool.
@@ -130,7 +131,7 @@ public class SwaggerTool {
     public static void validateSwaggerContent(String swaggerFileContent, int validationLevel) {
         List<Object> swaggerTypeAndName = getSwaggerVersion(swaggerFileContent);
 
-        if (validationLevel == 1) {
+        if (validationLevel == 2) {
             if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR) && swaggerTypeAndName.size() == 1) {
                 return;
             } else {
@@ -238,8 +239,6 @@ public class SwaggerTool {
     }
 
     public static boolean swagger2Validator(String swagger, int validationLevel) {
-        boolean isSwaggerMissing = false;
-        boolean isValidForAPIM = true;
         SwaggerParser swaggerParser = new SwaggerParser();
         OpenAPIParser parser= new OpenAPIParser();
         ParseOptions options = new ParseOptions();
@@ -250,14 +249,21 @@ public class SwaggerTool {
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
         if (parseAttemptForV2.getMessages().size() > 0) {
             for (String message : parseAttemptForV2.getMessages()) {
+                errorList.add(message);
+
+                // no point of logging further errors if file is not a swagger
+                //validation failed count is already incremented while getting the version
                 if (message.contains(Constants.SWAGGER_IS_MISSING_MSG)) {
                     errorMessageBuilder.append(Constants.INVALID_OAS2_FOUND_ERROR_CODE)
                             .append(", Error: ").append(Constants.INVALID_OAS2_FOUND_ERROR_MESSAGE)
                             .append(", Swagger Error: ").append(Constants.SWAGGER_IS_MISSING_MSG);
                     log.error(errorMessageBuilder.toString());
-                    isSwaggerMissing = true;
+                    return true;
                 }
-                if (validationLevel == 1) {
+            }
+
+            if (validationLevel == 2) {
+                for (String message : errorList) {
                     if (message.contains(Constants.MALFORMED_SWAGGER_ERROR)) {
                         errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
                                 .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
@@ -274,9 +280,6 @@ public class SwaggerTool {
                             }
                         }
                     } else {
-                        if (isSchemaMissing(message)) {
-                            isValidForAPIM = false;
-                        }
                         // Since OpenAPIParser coverts the $ref to #/components/schemas/ when validating
                         // we need to replace #/components/schemas/ with #/definitions/ before printing the message
                         if (message.contains(Constants.SCHEMA_REF_PATH)) {
@@ -288,21 +291,20 @@ public class SwaggerTool {
                         log.error(errorMessageBuilder.toString());
                     }
                 }
+                validationFailedFileCount++;
             }
-            validationFailedFileCount++;
 
             if (parseAttemptForV2.getOpenAPI() != null) {
                 log.info("Swagger passed with errors, using may lead to functionality issues.");
                 totalPartialyPasedSwaggerFiles++;
             } else {
-                isValidForAPIM = false;
                 log.error("Malformed Swagger, Please fix the listed issues before proceeding");
                 totalMalformedSwaggerFiles++;
             }
         } else {
             boolean didManualParseChecksFail = false;
 
-            if (validationLevel == 1) {
+            if (validationLevel == 2) {
                 // Check whether the given OpenAPI definition contains empty resource paths
                 // We are checking this manually since the Swagger parser does not throw an error for this
                 // Which is a known issue of Swagger 2.0 parser
@@ -358,12 +360,10 @@ public class SwaggerTool {
             }
 
             if (parseAttemptForV2.getOpenAPI() == null) {
-                isValidForAPIM = false;
                 log.error(Constants.UNABLE_TO_RENDER_THE_DEFINITION_ERROR);
                 validationFailedFileCount++;
             } else {
-                if (didManualParseChecksFail) { //becomes true only in level 1 and 2
-                    isValidForAPIM = false;
+                if (didManualParseChecksFail) { //becomes true only in level 2
                     log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                     validationFailedFileCount++;
                 } else {
@@ -372,10 +372,14 @@ public class SwaggerTool {
                 }
             }
         }
-        if (isValidForAPIM) {
-            log.info("Swagger file will be accepted by the APIM 4.2.0 ");
+        if (validationFailedFileCount == 0 && totalMalformedSwaggerFiles == 0) {
+            if (validationLevel == 1) {
+                log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
+            } else {
+                log.info("Swagger file will be accepted by the APIM 4.2.0 ");
+            }
         }
-        return isSwaggerMissing;
+        return false;
     }
 
 
@@ -474,23 +478,24 @@ public class SwaggerTool {
     }
 
     public static boolean swagger3Validator(String swagger, int validationLevel) {
-        boolean isOpenAPIMissing = false;
-
         OpenAPIV3Parser openAPIV3Parser = new OpenAPIV3Parser();
         ParseOptions options = new ParseOptions();
         options.setResolve(true);
         options.setResolveFully(true);
         SwaggerParseResult parseResult = openAPIV3Parser.readContents(swagger, null, options);
+        StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
         if (parseResult.getMessages().size() > 0) {
             for (String message : parseResult.getMessages()) {
-                StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
+                errorList.add(message);
                 if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
                     errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
                             .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
                     log.error(errorMessageBuilder.toString());
-                    isOpenAPIMissing = true;
+                    return true;
                 }
-                if (validationLevel == 1) {
+            }
+            if (validationLevel == 2) {
+                for (String message : errorList) {
                     if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
                         logRemoteReferenceIssues(swagger);
                     } else {
@@ -508,18 +513,15 @@ public class SwaggerTool {
                     log.error(errorMessageBuilder.toString());
                     }
                 }
+                validationFailedFileCount++;
             }
-            if (!isOpenAPIMissing) {
-                if (parseResult.getOpenAPI() != null) {
-                    log.info("OpenAPI passed with errors, using may lead to functionality issues.");
-                    totalPartialyPasedSwaggerFiles++;
-                } else {
-                    log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
-                    ++totalMalformedSwaggerFiles;
-                }
-                if (validationLevel != 0) {
-                    validationFailedFileCount++;
-                }
+
+            if (parseResult.getOpenAPI() != null) {
+                log.info("OpenAPI passed with errors, using may lead to functionality issues.");
+                totalPartialyPasedSwaggerFiles++;
+            } else {
+                log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
+                ++totalMalformedSwaggerFiles;
             }
         } else {
             //to catch a scenario where the parser doesn't return swagger errors and the file is not
@@ -532,7 +534,14 @@ public class SwaggerTool {
                 validationFailedFileCount++;
             }
         }
-        return isOpenAPIMissing;
+        if (validationFailedFileCount == 0 && totalMalformedSwaggerFiles == 0) {
+            if (validationLevel == 1) {
+                log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
+            } else {
+                log.info("Swagger file will be accepted by the APIM 4.2.0 ");
+            }
+        }
+        return false;
     }
 
     /**
