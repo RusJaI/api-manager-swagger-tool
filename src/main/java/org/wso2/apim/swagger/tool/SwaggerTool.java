@@ -64,16 +64,15 @@ public class SwaggerTool {
      * @param args 2 parameters are supported when executing the tool.
      *             Param 1: Direct path to the swagger/openAPI file or the folder location
      *             Ex: location:/Users/xyz/Downloads/swagger-definition/invalid-swagger-definitions
-     *             Param 2: validationLevel - Default will be 2
+     *             Param 2: validationLevel - Default will be 1
      *             If the validationLevel is 0, swagger validation errors won't be returned only verify whether the
      *             swagger definition is returned after the validation.
      *             If the validationLevel is 1, swagger will be validated as per the same behaviour as API Manager 4.0.0
-     *             If the validationLevel is 2, All the validation errors will be returned
      */
     public static void main(String[] args) {
         if (args.length == 1 || args.length == 2) {
             String swaggerContent = args[0];
-            int validationLevel = 2;
+            int validationLevel = 1;
             if (args.length == 2) {
                 validationLevel = Integer.parseInt(args[1]);
             }
@@ -97,7 +96,7 @@ public class SwaggerTool {
 
     /**
      * @param url             url for the swagger file
-     * @param validationLevel swagger validation level[0,1,2]
+     * @param validationLevel swagger validation level[0,1]
      */
     static void validateSwaggerFromLocation(String url, int validationLevel) {
         try {
@@ -250,7 +249,7 @@ public class SwaggerTool {
         SwaggerParseResult parseAttemptForV2 = parser.readContents(swagger, new ArrayList<>(), options);
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
         if (parseAttemptForV2.getMessages().size() > 0) {
-             if (validationLevel == 1 || validationLevel == 2) {
+             if (validationLevel == 1) {
                 for (String message : parseAttemptForV2.getMessages()) {
                     if (message.contains(Constants.SWAGGER_IS_MISSING_MSG)) {
                         errorMessageBuilder.append(Constants.INVALID_OAS2_FOUND_ERROR_CODE)
@@ -301,7 +300,7 @@ public class SwaggerTool {
         } else {
             boolean didManualParseChecksFail = false;
 
-            if (validationLevel == 1 || validationLevel == 2) {
+            if (validationLevel == 1) {
                 // Check whether the given OpenAPI definition contains empty resource paths
                 // We are checking this manually since the Swagger parser does not throw an error for this
                 // Which is a known issue of Swagger 2.0 parser
@@ -481,7 +480,7 @@ public class SwaggerTool {
         options.setResolveFully(true);
         SwaggerParseResult parseResult = openAPIV3Parser.readContents(swagger, null, options);
         if (parseResult.getMessages().size() > 0) {
-            if (validationLevel == 1 || validationLevel == 2) {
+            if (validationLevel == 1) {
                 for (String message : parseResult.getMessages()) {
                     StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
                     if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
