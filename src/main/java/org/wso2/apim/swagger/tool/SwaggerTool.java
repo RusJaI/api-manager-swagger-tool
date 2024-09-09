@@ -72,7 +72,7 @@ public class SwaggerTool {
     public static void main(String[] args) {
         if (args.length == 1 || args.length == 2) {
             String swaggerContent = args[0];
-            int validationLevel = 1;
+            int validationLevel = 2;
             if (args.length == 2) {
                 validationLevel = Integer.parseInt(args[1]);
             }
@@ -249,15 +249,16 @@ public class SwaggerTool {
         SwaggerParseResult parseAttemptForV2 = parser.readContents(swagger, new ArrayList<>(), options);
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
         if (parseAttemptForV2.getMessages().size() > 0) {
-             if (validationLevel == 1) {
-                for (String message : parseAttemptForV2.getMessages()) {
-                    if (message.contains(Constants.SWAGGER_IS_MISSING_MSG)) {
-                        errorMessageBuilder.append(Constants.INVALID_OAS2_FOUND_ERROR_CODE)
-                                .append(", Error: ").append(Constants.INVALID_OAS2_FOUND_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append(Constants.SWAGGER_IS_MISSING_MSG);
-                        log.error(errorMessageBuilder.toString());
-                        isSwaggerMissing = true;
-                    } else if (message.contains(Constants.MALFORMED_SWAGGER_ERROR)) {
+            for (String message : parseAttemptForV2.getMessages()) {
+                if (message.contains(Constants.SWAGGER_IS_MISSING_MSG)) {
+                    errorMessageBuilder.append(Constants.INVALID_OAS2_FOUND_ERROR_CODE)
+                            .append(", Error: ").append(Constants.INVALID_OAS2_FOUND_ERROR_MESSAGE)
+                            .append(", Swagger Error: ").append(Constants.SWAGGER_IS_MISSING_MSG);
+                    log.error(errorMessageBuilder.toString());
+                    isSwaggerMissing = true;
+                }
+                if (validationLevel == 1) {
+                    if (message.contains(Constants.MALFORMED_SWAGGER_ERROR)) {
                         errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
                                 .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
                                 .append(", Swagger Error: ").append(message);
@@ -287,8 +288,9 @@ public class SwaggerTool {
                         log.error(errorMessageBuilder.toString());
                     }
                 }
-                validationFailedFileCount++;
             }
+            validationFailedFileCount++;
+
             if (parseAttemptForV2.getOpenAPI() != null) {
                 log.info("Swagger passed with errors, using may lead to functionality issues.");
                 totalPartialyPasedSwaggerFiles++;
@@ -480,29 +482,30 @@ public class SwaggerTool {
         options.setResolveFully(true);
         SwaggerParseResult parseResult = openAPIV3Parser.readContents(swagger, null, options);
         if (parseResult.getMessages().size() > 0) {
-            if (validationLevel == 1) {
-                for (String message : parseResult.getMessages()) {
-                    StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
+            for (String message : parseResult.getMessages()) {
+                StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
+                if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
+                    errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
+                            .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
+                    log.error(errorMessageBuilder.toString());
+                    isOpenAPIMissing = true;
+                }
+                if (validationLevel == 1) {
                     if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
                         logRemoteReferenceIssues(swagger);
-                    } else if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
-                        errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
-                                .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
-                        log.error(errorMessageBuilder.toString());
-                        isOpenAPIMissing = true;
                     } else {
-                        // If the error message contains "schema is unexpected", we modify the error message notifying
-                        // that the schema object is not adhering to the OpenAPI Specification. Also, we add a note to
-                        // verify the reference object is of the format $ref: '#/components/schemas/{schemaName}'
-                        if (message.contains("schema is unexpected")) {
-                            message = message.concat(". Please verify whether the schema object is adhering to " +
-                                    "the OpenAPI Specification. Make sure that the reference object is of " +
-                                    "format $ref: '#/components/schemas/{schemaName}'");
-                        }
-                        errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append(message);
-                        log.error(errorMessageBuilder.toString());
+                    // If the error message contains "schema is unexpected", we modify the error message notifying
+                    // that the schema object is not adhering to the OpenAPI Specification. Also, we add a note to
+                    // verify the reference object is of the format $ref: '#/components/schemas/{schemaName}'
+                    if (message.contains("schema is unexpected")) {
+                        message = message.concat(". Please verify whether the schema object is adhering to " +
+                                "the OpenAPI Specification. Make sure that the reference object is of " +
+                                "format $ref: '#/components/schemas/{schemaName}'");
+                    }
+                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                            .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
+                            .append(", Swagger Error: ").append(message);
+                    log.error(errorMessageBuilder.toString());
                     }
                 }
             }
