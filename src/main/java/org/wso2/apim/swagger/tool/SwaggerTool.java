@@ -57,7 +57,6 @@ public class SwaggerTool {
     static int totalFileCount = 0;
     static int validationFailedFileCount = 0;
     static int validationSuccessFileCount = 0;
-    static int totalMalformedSwaggerFiles = 0;
     static int totalPartialyPasedSwaggerFiles = 0;
     static List<String> errorList = new ArrayList<String>();
 
@@ -83,8 +82,7 @@ public class SwaggerTool {
                 validateSwaggerContent(swaggerContent, validationLevel);
             }
             log.info("Summary --- Total Files Processed: " + totalFileCount + ". Total Successful Files Count "
-                    + validationSuccessFileCount + ". Total Failed Files Count: " + validationFailedFileCount + ". " +
-                    "Total Malformed Swagger File Count: " + totalMalformedSwaggerFiles);
+                    + validationSuccessFileCount + ". Total Failed Files Count: " + validationFailedFileCount + ". ");
         } else {
             log.info("\nUsage: \t java -jar apim-swagger-validator.jar " +
                     "[<File uri> | <Directory uri> | <Swagger String>] [0 | 1 | 2] \n 0 \tValidation disabled. " +
@@ -293,14 +291,8 @@ public class SwaggerTool {
                 }
                 validationFailedFileCount++;
             }
+            log.info("Swagger passed with errors, using may lead to functionality issues.");
 
-            if (parseAttemptForV2.getOpenAPI() != null) {
-                log.info("Swagger passed with errors, using may lead to functionality issues.");
-                totalPartialyPasedSwaggerFiles++;
-            } else {
-                log.error("Malformed Swagger, Please fix the listed issues before proceeding");
-                totalMalformedSwaggerFiles++;
-            }
         } else {
             boolean didManualParseChecksFail = false;
 
@@ -347,32 +339,24 @@ public class SwaggerTool {
                 // Check for multiple resource paths with and without trailing slashes.
                 // If there are two resource paths with the same name, one with and one without trailing slashes,
                 // it will be considered an error since those are considered as one resource in the API deployment.
-                if (parseAttemptForV2.getOpenAPI() != null) {
-                    if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
-                        errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append("Swagger definition cannot have " +
-                                        "multiple resource paths with the same name");
-                        log.error(errorMessageBuilder.toString());
-                        didManualParseChecksFail = true;
-                    }
+                if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
+                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
+                            .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
+                            .append(", Swagger Error: ").append("Swagger definition cannot have " +
+                                    "multiple resource paths with the same name");
+                    log.error(errorMessageBuilder.toString());
+                    didManualParseChecksFail = true;
                 }
             }
-
-            if (parseAttemptForV2.getOpenAPI() == null) {
-                log.error(Constants.UNABLE_TO_RENDER_THE_DEFINITION_ERROR);
+            if (didManualParseChecksFail) { //becomes true only in level 2
+                log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                 validationFailedFileCount++;
             } else {
-                if (didManualParseChecksFail) { //becomes true only in level 2
-                    log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
-                    validationFailedFileCount++;
-                } else {
-                    log.info("Swagger file is valid");
-                    validationSuccessFileCount++;
-                }
+                log.info("Swagger file is valid");
+                validationSuccessFileCount++;
             }
         }
-        if (validationFailedFileCount == 0 && totalMalformedSwaggerFiles == 0) {
+        if (validationFailedFileCount == 0) {
             if (validationLevel == 1) {
                 log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
             } else {
@@ -515,26 +499,13 @@ public class SwaggerTool {
                 }
                 validationFailedFileCount++;
             }
-
-            if (parseResult.getOpenAPI() != null) {
-                log.info("OpenAPI passed with errors, using may lead to functionality issues.");
-                totalPartialyPasedSwaggerFiles++;
-            } else {
-                log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
-                ++totalMalformedSwaggerFiles;
-            }
+            log.info("OpenAPI passed with errors, using may lead to functionality issues.");
+            totalPartialyPasedSwaggerFiles++;
         } else {
-            //to catch a scenario where the parser doesn't return swagger errors and the file is not
-            // actually a swagger
-            if (parseResult.getOpenAPI() != null) {
-                log.info("Swagger file is valid OpenAPI 3 definition");
-                validationSuccessFileCount++;
-            } else {
-                log.error(Constants.UNABLE_TO_RENDER_THE_DEFINITION_ERROR);
-                validationFailedFileCount++;
-            }
+            log.info("Swagger file is valid OpenAPI 3 definition");
+            validationSuccessFileCount++;
         }
-        if (validationFailedFileCount == 0 && totalMalformedSwaggerFiles == 0) {
+        if (validationFailedFileCount == 0) {
             if (validationLevel == 1) {
                 log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
             } else {
