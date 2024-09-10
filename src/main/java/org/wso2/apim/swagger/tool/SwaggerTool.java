@@ -123,53 +123,18 @@ public class SwaggerTool {
 
     /**
      * @param swaggerFileContent swagger file content to be validated
-     * @param validationLevel    validation level [0,1,2]
-     *  relaxedValidation = 0, API Manager 4.2.0 validation =1, full validation =2
+     * @param validationLevel    validation level [1,2]
+     *  API Manager 4.0.0 validation =1, API Manager 4.2.0 validation =2
      */
     public static void validateSwaggerContent(String swaggerFileContent, int validationLevel) {
         List<Object> swaggerTypeAndName = getSwaggerVersion(swaggerFileContent);
 
-        if (validationLevel == 2) {
-            if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR) && swaggerTypeAndName.size() == 1) {
-                return;
-            } else {
-                if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.SWAGGER)) {
-                    log.info("---------------- Parsing Started SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ----------------");
-                    swagger2Validator(swaggerFileContent, validationLevel);
-                    log.info("---------------- Parsing Complete SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ---------------- \n");
-                } else if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.OPEN_API)) {
-                    log.info("---------------- Parsing Started openApiName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ----------------");
-                    boolean isOpenAPIMissing = swagger3Validator(swaggerFileContent, validationLevel);
-                    if (isOpenAPIMissing) {
-                        swagger2Validator(swaggerFileContent, validationLevel);
-                    }
-                    log.info("---------------- Parsing Complete openApiName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ----------------\n");
-                }
-            }
-        } else {
-            if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR)) {
-                if (swaggerTypeAndName.size() == 2) {
-                    log.info("---------------- Parsing Started SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ----------------");
-                    boolean isOpenAPIMissing = swagger3Validator(swaggerFileContent, validationLevel);
-                    boolean isSwaggerMissing;
-                    if (isOpenAPIMissing) {
-                        isSwaggerMissing = swagger2Validator(swaggerFileContent, validationLevel);
-                        if (isSwaggerMissing) {
-                            log.error("Invalid OpenAPI, Error Code: " + Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE +
-                                    ", Error: " + Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE
-                                    + ", Swagger Error: " + Constants.SWAGGER_OR_OPENAPI_IS_MISSING_MSG);
-                        }
-                    }
-                    log.info("---------------- Parsing Complete SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
-                            "\" ---------------- \n");
-                }
-                return;
-            }
+        if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR) && swaggerTypeAndName.size() == 1) {
+            return;
+        } else if (swaggerTypeAndName.size() == 2 && swaggerTypeAndName.get(1).equals(Constants.TITLE_NULL)) {
+            return;
+        }
+        else {
             if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.SWAGGER)) {
                 log.info("---------------- Parsing Started SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
                         "\" ----------------");
@@ -186,6 +151,7 @@ public class SwaggerTool {
                 log.info("---------------- Parsing Complete openApiName \"" + swaggerTypeAndName.get(1).toString() +
                         "\" ----------------\n");
             }
+            // doesn't parse the Constants.SwaggerVersion.ERROR type further
         }
     }
 
@@ -203,7 +169,7 @@ public class SwaggerTool {
             rootNode = mapper.readTree(apiDefinition.getBytes());
             node = (ObjectNode) rootNode;
         } catch (Exception e) {
-            log.error("Error occurred while parsing OAS definition. Verify the provided definition format: " + e.getMessage());
+            log.error("Error occurred while parsing the provided API definition. Verify the provided definition format: " + e.getMessage());
             swaggerTypeAndName.add(Constants.SwaggerVersion.ERROR);
             validationFailedFileCount++;
             return swaggerTypeAndName;
@@ -213,13 +179,31 @@ public class SwaggerTool {
         if (openapi != null && openapi.asText().startsWith("3.")) {
 
             swaggerTypeAndName.add(Constants.SwaggerVersion.OPEN_API);
-            swaggerTypeAndName.add(name);
+            // API Manager doesn't allow to create an API from a spec where info.title field is missing
+            if (!isTitleFieldAvailable(node.get("info"))) {
+                log.error("Attribute info.title is missing in the OpenAPI definition");
+                validationFailedFileCount++;
+                swaggerTypeAndName.add(Constants.TITLE_NULL);
+            } else if (name == null || name.equals("null")) {
+                log.error("Attribute title cannot contain the value null in the OpenAPI3 definition");
+                validationFailedFileCount++;
+                swaggerTypeAndName.add(Constants.TITLE_NULL);
+            } else {
+                swaggerTypeAndName.add(name);
+            }
             return swaggerTypeAndName;
         }
         JsonNode swagger = node.get("swagger");
         if (swagger != null) {
             swaggerTypeAndName.add(Constants.SwaggerVersion.SWAGGER);
-            swaggerTypeAndName.add(name);
+            // API Manager doesn't allow to create an API from a spec where info.title field is missing
+            if (!isTitleFieldAvailable(node.get("info"))) {
+                log.error("Attribute info.title is missing in the OpenAPI definition");
+                validationFailedFileCount++;
+                swaggerTypeAndName.add(Constants.TITLE_NULL);
+            } else {
+                swaggerTypeAndName.add(name);
+            }
             return swaggerTypeAndName;
         }
 
@@ -229,11 +213,18 @@ public class SwaggerTool {
         return swaggerTypeAndName;
     }
 
+    private static boolean isTitleFieldAvailable(JsonNode node) {
+        if (node != null && node.has("title")) {
+            return true;
+        }
+        return false;
+    }
+
     public static String getSwaggerFileName(JsonNode node) {
-        if (node != null) {
+        if (node != null && node.has("title")) {
             return node.get("title").asText();
         }
-        return "";
+        return null;
     }
 
     public static boolean swagger2Validator(String swagger, int validationLevel) {
@@ -500,7 +491,6 @@ public class SwaggerTool {
                 validationFailedFileCount++;
             }
             log.info("OpenAPI passed with errors, using may lead to functionality issues.");
-            totalPartialyPasedSwaggerFiles++;
         } else {
             log.info("Swagger file is valid OpenAPI 3 definition");
             validationSuccessFileCount++;

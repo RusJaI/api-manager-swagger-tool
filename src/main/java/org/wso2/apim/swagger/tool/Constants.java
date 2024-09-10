@@ -51,4 +51,5 @@ public class Constants {
         OPEN_API,
         ERROR,
     }
+    public static final String TITLE_NULL = "NULL";
 }
