@@ -208,7 +208,8 @@ public class SwaggerTool {
 
         log.error("Invalid OAS definition provided.");
         swaggerTypeAndName.add(Constants.SwaggerVersion.ERROR);
-        swaggerTypeAndName.add(name);
+        swaggerTypeAndName.add(Constants.TITLE_NULL);
+        validationFailedFileCount++;
         return swaggerTypeAndName;
     }
 
