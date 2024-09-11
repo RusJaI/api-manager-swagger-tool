@@ -57,7 +57,6 @@ public class SwaggerTool {
     static int totalFileCount = 0;
     static int validationFailedFileCount = 0;
     static int validationSuccessFileCount = 0;
-    static int totalPartialyPasedSwaggerFiles = 0;
     static List<String> errorList = new ArrayList<String>();
 
     /**
