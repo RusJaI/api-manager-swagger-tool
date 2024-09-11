@@ -29,6 +29,7 @@ import io.swagger.models.HttpMethod;
 import io.swagger.models.Swagger;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.parser.SwaggerParser;
+import io.swagger.parser.util.SwaggerDeserializationResult;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.PathItem;
 import io.swagger.v3.parser.ObjectMapperFactory;
@@ -135,19 +136,19 @@ public class SwaggerTool {
         }
         else {
             if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.SWAGGER)) {
-                log.info("---------------- Parsing Started SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
-                        "\" ----------------");
+                System.out.println("---------------- Parsing Started SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
+                        "\" ----------------\n");
                 swagger2Validator(swaggerFileContent, validationLevel);
-                log.info("---------------- Parsing Complete SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
+                System.out.println("\n---------------- Parsing Complete SwaggerName \"" + swaggerTypeAndName.get(1).toString() +
                         "\" ---------------- \n");
             } else if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.OPEN_API)) {
-                log.info("---------------- Parsing Started openApiName \"" + swaggerTypeAndName.get(1).toString() +
-                        "\" ----------------");
+                System.out.println("---------------- Parsing Started openApiName \"" + swaggerTypeAndName.get(1).toString() +
+                        "\" ----------------\n");
                 boolean isOpenAPIMissing = swagger3Validator(swaggerFileContent, validationLevel);
                 if (isOpenAPIMissing) {
                     swagger2Validator(swaggerFileContent, validationLevel);
                 }
-                log.info("---------------- Parsing Complete openApiName \"" + swaggerTypeAndName.get(1).toString() +
+                System.out.println("\n---------------- Parsing Complete openApiName \"" + swaggerTypeAndName.get(1).toString() +
                         "\" ----------------\n");
             }
             // doesn't parse the Constants.SwaggerVersion.ERROR type further
@@ -227,15 +228,13 @@ public class SwaggerTool {
         return null;
     }
 
-    public static boolean swagger2Validator(String swagger, int validationLevel) {
-        SwaggerParser swaggerParser = new SwaggerParser();
-        OpenAPIParser parser= new OpenAPIParser();
-        ParseOptions options = new ParseOptions();
-        options.setResolve(true);
-        options.setFlatten(true);
-        options.setResolveFully(true);
-        SwaggerParseResult parseAttemptForV2 = parser.readContents(swagger, new ArrayList<>(), options);
+    public static boolean swagger2Validator(String apiDefinition, int validationLevel) {
+        SwaggerParser parser = new SwaggerParser();
+
+        SwaggerDeserializationResult parseAttemptForV2 = parser.readWithInfo(apiDefinition);
+
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid Swagger, Error Code: ");
+
         if (parseAttemptForV2.getMessages().size() > 0) {
             for (String message : parseAttemptForV2.getMessages()) {
                 errorList.add(message);
@@ -252,20 +251,17 @@ public class SwaggerTool {
             }
 
             if (validationLevel == 2) {
+                int i = 1;
+                printErrorCount();
                 for (String message : errorList) {
                     if (message.contains(Constants.MALFORMED_SWAGGER_ERROR)) {
-                        errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append(message);
                         try {
-                            swaggerParser.parse(swagger);
-                            log.error(errorMessageBuilder.toString());
+                            parser.parse(apiDefinition);
                         } catch (Exception e) {
                             if (e.getMessage().contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
-                                logRemoteReferenceIssues(swagger);
+                                message = logRemoteReferenceIssues(apiDefinition, message);
                             } else {
-                                errorMessageBuilder.append(", Cause by: ").append(e.getMessage());
-                                log.error(errorMessageBuilder.toString());
+                                message = message.concat(", Cause by: ").concat(e.getMessage());
                             }
                         }
                     } else {
@@ -274,31 +270,28 @@ public class SwaggerTool {
                         if (message.contains(Constants.SCHEMA_REF_PATH)) {
                             message = message.replace(Constants.SCHEMA_REF_PATH, "#/definitions/");
                         }
-                        errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
-                                .append(", Swagger Error: ").append(message);
-                        log.error(errorMessageBuilder.toString());
                     }
+                    System.out.println("\n" + i++ + " : " + message);
                 }
                 validationFailedFileCount++;
             }
-            log.info("Swagger passed with errors, using may lead to functionality issues.");
+            if (validationLevel == 1 && validationFailedFileCount == 0) {
+                validationSuccessFileCount++;
+                log.info("Swagger passed with errors, using may lead to functionality issues.");
+            }
 
         } else {
             boolean didManualParseChecksFail = false;
 
             if (validationLevel == 2) {
+                int i = 0;
                 // Check whether the given OpenAPI definition contains empty resource paths
                 // We are checking this manually since the Swagger parser does not throw an error for this
                 // Which is a known issue of Swagger 2.0 parser
-                Swagger swaggerObject = swaggerParser.parse(swagger);
+                Swagger swaggerObject = parser.parse(apiDefinition);
 
                 if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
-                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                            .append(", Error: ").append(Constants.EMPTY_RESOURCE_PATH_ERROR_MESSAGE)
-                            .append(", Swagger Error: ").append("Resource paths cannot be empty " +
-                                    "in the swagger definition");
-                    log.error(errorMessageBuilder.toString());
+                    errorList.add("Resource paths cannot be empty in the swagger definition");
                     didManualParseChecksFail = true;
                 } else {
                     Map<String, io.swagger.models.Path> paths = swaggerObject.getPaths();
@@ -306,21 +299,13 @@ public class SwaggerTool {
                         Map<io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
                                 paths.get(key).getOperationMap();
                         if (operationsMap.size() == 0) {
-                            errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                    .append(", Error: ").append(Constants.NO_OPERATIONS_FOUND_ERROR_MESSAGE)
-                                    .append(", Swagger Error: ").append("Operations cannot be empty " +
-                                            "for a resource path");
-                            log.error(errorMessageBuilder.toString());
+                            errorList.add("Operations cannot be empty for a resource path : " + key);
                             didManualParseChecksFail = true;
                         }
                         //if operation object is empty, it is caught by the swagger parser
                         for (HttpMethod httpMethod : operationsMap.keySet()) {
                             if (operationsMap.get(httpMethod) == null) {
-                                errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                                        .append(", Error: ").append(Constants.EMPTY_OPERATION_OBJECT_ERROR_MESSAGE)
-                                        .append(", Swagger Error: ").append("Operation objects cannot be empty " +
-                                                "in the swagger definition");
-                                log.error(errorMessageBuilder.toString());
+                                errorList.add("Operation objects cannot be empty for the " + httpMethod + " method in the resource path : " + key);
                                 didManualParseChecksFail = true;
                             }
                         }
@@ -330,16 +315,16 @@ public class SwaggerTool {
                 // Check for multiple resource paths with and without trailing slashes.
                 // If there are two resource paths with the same name, one with and one without trailing slashes,
                 // it will be considered an error since those are considered as one resource in the API deployment.
-                if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV2.getOpenAPI(), null)) {
-                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                            .append(", Error: ").append(Constants.MULTIPLE_RESOURCE_PATHS_WITH_SAME_NAME_ERROR_MESSAGE)
-                            .append(", Swagger Error: ").append("Swagger definition cannot have " +
-                                    "multiple resource paths with the same name");
-                    log.error(errorMessageBuilder.toString());
+                if (!isValidWithPathsWithTrailingSlashes(null, parseAttemptForV2.getSwagger())) {
+                    errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
                     didManualParseChecksFail = true;
                 }
             }
             if (didManualParseChecksFail) { //becomes true only in level 2
+                printErrorCount();
+                for (int i = 0; i < errorList.size(); i++) {
+                    System.out.println("\n" + i+1 + " : " + errorList.get(i));
+                }
                 log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                 validationFailedFileCount++;
             } else {
@@ -361,7 +346,7 @@ public class SwaggerTool {
     /**
      * This method will validate the OAS definition against the resource paths with trailing slashes.
      *
-     * @param openAPI            OpenAPI object
+     * @param swagger            OpenAPI object
      * @param swagger         Swagger object
      * @return isSwaggerValid boolean
      */
@@ -452,15 +437,14 @@ public class SwaggerTool {
         return errorMessage.contains(Constants.SCHEMA_REF_PATH) && errorMessage.contains("is missing");
     }
 
-    public static boolean swagger3Validator(String swagger, int validationLevel) {
+    public static boolean swagger3Validator(String apiDefinition, int validationLevel) {
         OpenAPIV3Parser openAPIV3Parser = new OpenAPIV3Parser();
         ParseOptions options = new ParseOptions();
         options.setResolve(true);
-        options.setResolveFully(true);
-        SwaggerParseResult parseResult = openAPIV3Parser.readContents(swagger, null, options);
+        SwaggerParseResult parseAttemptForV3 = openAPIV3Parser.readContents(apiDefinition, null, options);
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
-        if (parseResult.getMessages().size() > 0) {
-            for (String message : parseResult.getMessages()) {
+        if (parseAttemptForV3.getMessages().size() > 0) {
+            for (String message : parseAttemptForV3.getMessages()) {
                 errorList.add(message);
                 if (message.contains(Constants.OPENAPI_IS_MISSING_MSG)) {
                     errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
@@ -470,30 +454,43 @@ public class SwaggerTool {
                 }
             }
             if (validationLevel == 2) {
+                int i = 1;
+                printErrorCount();
                 for (String message : errorList) {
                     if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
-                        logRemoteReferenceIssues(swagger);
+                        message = logRemoteReferenceIssues(apiDefinition, message);
                     } else {
-                    // If the error message contains "schema is unexpected", we modify the error message notifying
-                    // that the schema object is not adhering to the OpenAPI Specification. Also, we add a note to
-                    // verify the reference object is of the format $ref: '#/components/schemas/{schemaName}'
-                    if (message.contains("schema is unexpected")) {
-                        message = message.concat(". Please verify whether the schema object is adhering to " +
-                                "the OpenAPI Specification. Make sure that the reference object is of " +
-                                "format $ref: '#/components/schemas/{schemaName}'");
+                        // If the error message contains "schema is unexpected", we modify the error message notifying
+                        // that the schema object is not adhering to the OpenAPI Specification. Also, we add a note to
+                        // verify the reference object is of the format $ref: '#/components/schemas/{schemaName}'
+                        if (message.contains("schema is unexpected")) {
+                            message = message.concat(". Please verify whether the schema object is adhering to " +
+                                    "the OpenAPI Specification. Make sure that the reference object is of " +
+                                    "format $ref: '#/components/schemas/{schemaName}'");
+                        }
                     }
-                    errorMessageBuilder.append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_CODE)
-                            .append(", Error: ").append(Constants.OPENAPI_PARSE_EXCEPTION_ERROR_MESSAGE)
-                            .append(", Swagger Error: ").append(message);
-                    log.error(errorMessageBuilder.toString());
-                    }
+                    System.out.println("\n" + i++ + " : " + message);
                 }
                 validationFailedFileCount++;
             }
             log.info("OpenAPI passed with errors, using may lead to functionality issues.");
         } else {
-            log.info("Swagger file is valid OpenAPI 3 definition");
-            validationSuccessFileCount++;
+
+            // Check for multiple resource paths with and without trailing slashes.
+            // If there are two resource paths with the same name, one with and one without trailing slashes,
+            // it will be considered an error since those are considered as one resource in the API deployment.
+            if (parseAttemptForV3.getOpenAPI() != null) {
+                if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV3.getOpenAPI(), null)) {
+                    errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
+                };
+            }
+            if (errorList.size() > 0) { // can have only 1 error
+                printErrorCount();
+                System.out.println("\n1 : " + errorList.get(0));
+            } else {
+                log.info("Swagger file is valid OpenAPI 3 definition");
+                validationSuccessFileCount++;
+            }
         }
         if (validationFailedFileCount == 0) {
             if (validationLevel == 1) {
@@ -505,12 +502,17 @@ public class SwaggerTool {
         return false;
     }
 
+    private static void printErrorCount() {
+        if (errorList.size() > 0) {
+            System.out.println("#### Following " + errorList.size() + " errors found ###");
+        }
+    }
     /**
      * This method will log the remote references in the given Swagger or OpenAPI definition.
      * @param apiDefinition Swagger or OpenAPI definition
      */
-    public static void logRemoteReferenceIssues(String apiDefinition) {
-        log.warn("Validate the following remote references and make sure that they are valid and accessible:");
+    public static String logRemoteReferenceIssues(String apiDefinition, String message) {
+        message = message.concat("\nValidate the following remote references and make sure that they are valid and accessible:\n");
 
         // Parse the Swagger or OpenAPI definition and extract the remote references by picking
         // the values of the $ref ke
@@ -535,9 +537,11 @@ public class SwaggerTool {
             // If schema reference starts with #/components/schemas/ (OAS 3 ref objects) or #/definitions/ (Swagger ref objects), it is a local reference.
             // Hence, if reference does not start with a "#/", it is a remote reference.
             if (!remoteReference.startsWith("\"#/")) {
-                log.warn(refValue.toString());
+                //log.warn(refValue.toString());
+                message = message.concat(refValue.toString());
             }
         }
+        return message;
     }
 
     /**
