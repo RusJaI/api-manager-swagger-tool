@@ -65,7 +65,7 @@ public class SwaggerTool {
      *             Param 2: validationLevel - Default will be 1
      *             If the validationLevel is 0, swagger validation errors won't be returned only verify whether the
      *             swagger definition is returned after the validation.
-     *             If the validationLevel is 1, swagger will be validated as per the same behaviour as API Manager 4.0.0
+     *             If the validationLevel is 1, swagger will be validated as per the relaxed validation enabled behaviour of API Manager 4.2.0
      */
     public static void main(String[] args) {
         if (args.length == 1 || args.length == 2) {
@@ -83,9 +83,8 @@ public class SwaggerTool {
                     + validationSuccessFileCount + ". Total Failed Files Count: " + validationFailedFileCount + ". ");
         } else {
             log.info("\nUsage: \t java -jar apim-swagger-validator.jar " +
-                    "[<File uri> | <Directory uri> | <Swagger String>] [0 | 1 | 2] \n 0 \tValidation disabled. " +
-                    "Only verify whether the swagger/openAPI definition is returned by the validator. " +
-                    "\n 1 \tValidate as in WSO2 API Manager 4.0.0 and verify whether the swagger/openAPI " +
+                    "[<File uri> | <Directory uri> | <Swagger String>] [1 | 2]" +
+                    "\n 1 \tValidate as in Relaxed Validation enabled mode in WSO2 API Manager 4.2.0 and verify whether the swagger/openAPI " +
                     "definition is returned by the validator. \n 2 \tFully validate the definitions and verify " +
                     "whether the swagger/openAPI definition is returned by the validator");
         }
@@ -122,14 +121,15 @@ public class SwaggerTool {
     /**
      * @param swaggerFileContent swagger file content to be validated
      * @param validationLevel    validation level [1,2]
-     *  API Manager 4.0.0 validation =1, API Manager 4.2.0 validation =2
+     *  API Manager 4.2.0 relaxed validation =1, API Manager 4.2.0 default validation =2
      */
     public static void validateSwaggerContent(String swaggerFileContent, int validationLevel) {
         List<Object> swaggerTypeAndName = getSwaggerVersion(swaggerFileContent);
 
         if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR) && swaggerTypeAndName.size() == 1) {
             return;
-        } else if (swaggerTypeAndName.size() == 2 && swaggerTypeAndName.get(1).equals(Constants.TITLE_NULL)) {
+        } else if (swaggerTypeAndName.size() == 2 && swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR)
+                && swaggerTypeAndName.get(1).equals(Constants.TITLE_NULL)) {
             return;
         }
         else {
@@ -229,6 +229,7 @@ public class SwaggerTool {
     public static boolean swagger2Validator(String apiDefinition, int validationLevel) {
         List<String> errorList = new ArrayList<String>();
         SwaggerParser parser = new SwaggerParser();
+        boolean isSwaggerMissing = false;
 
         SwaggerDeserializationResult parseAttemptForV2 = parser.readWithInfo(apiDefinition);
 
@@ -245,11 +246,18 @@ public class SwaggerTool {
                             .append(", Error: ").append(Constants.INVALID_OAS2_FOUND_ERROR_MESSAGE)
                             .append(", Swagger Error: ").append(Constants.SWAGGER_IS_MISSING_MSG);
                     log.error(errorMessageBuilder.toString());
-                    return true;
+                    isSwaggerMissing = true;
                 }
             }
-
-            if (validationLevel == 2) {
+            if (validationLevel == 1) {//relaxed validation
+                if (parseAttemptForV2.getSwagger() == null) {
+                    log.error("Malformed Swagger, Please fix the listed issues before proceeding");
+                    validationFailedFileCount++;
+                } else {
+                    log.info("Swagger passed with errors, using may lead to functionality issues.");
+                    validationSuccessFileCount++;
+                }
+            } else { //APIM 4.2.0 default validation
                 int i = 1;
                 printErrorCount(errorList);
                 for (String message : errorList) {
@@ -274,52 +282,48 @@ public class SwaggerTool {
                 }
                 validationFailedFileCount++;
             }
-            if (validationLevel == 1 && validationFailedFileCount == 0) {
-                validationSuccessFileCount++;
-                log.info("Swagger passed with errors, using may lead to functionality issues.");
-            }
 
         } else {
+            //Current APIM 4.2.0 validation doesn't check relaxed validation here
+
             boolean didManualParseChecksFail = false;
 
-            if (validationLevel == 2) {
-                int i = 0;
-                // Check whether the given OpenAPI definition contains empty resource paths
-                // We are checking this manually since the Swagger parser does not throw an error for this
-                // Which is a known issue of Swagger 2.0 parser
-                Swagger swaggerObject = parser.parse(apiDefinition);
+            // Check whether the given OpenAPI definition contains empty resource paths
+            // We are checking this manually since the Swagger parser does not throw an error for this
+            // Which is a known issue of Swagger 2.0 parser
+            Swagger swaggerObject = parser.parse(apiDefinition);
 
-                if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
-                    errorList.add("Resource paths cannot be empty in the swagger definition");
-                    didManualParseChecksFail = true;
-                } else {
-                    Map<String, io.swagger.models.Path> paths = swaggerObject.getPaths();
-                    for (String key : paths.keySet()) {
-                        Map<io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
-                                paths.get(key).getOperationMap();
-                        if (operationsMap.size() == 0) {
-                            errorList.add("Operations cannot be empty for a resource path : " + key);
+            if (swaggerObject.getPaths() == null || swaggerObject.getPaths().size() == 0) {
+                errorList.add("Resource paths cannot be empty in the swagger definition");
+                didManualParseChecksFail = true;
+            } else {
+                Map<String, io.swagger.models.Path> paths = swaggerObject.getPaths();
+                for (String key : paths.keySet()) {
+                    Map<io.swagger.models.HttpMethod, io.swagger.models.Operation> operationsMap =
+                            paths.get(key).getOperationMap();
+                    if (operationsMap.size() == 0) {
+                        errorList.add("Operations cannot be empty for a resource path : " + key);
+                        didManualParseChecksFail = true;
+                    }
+                    //if operation object is empty, it is caught by the swagger parser
+                    for (HttpMethod httpMethod : operationsMap.keySet()) {
+                        if (operationsMap.get(httpMethod) == null) {
+                            errorList.add("Operation objects cannot be empty for the " + httpMethod + " method in the resource path : " + key);
                             didManualParseChecksFail = true;
-                        }
-                        //if operation object is empty, it is caught by the swagger parser
-                        for (HttpMethod httpMethod : operationsMap.keySet()) {
-                            if (operationsMap.get(httpMethod) == null) {
-                                errorList.add("Operation objects cannot be empty for the " + httpMethod + " method in the resource path : " + key);
-                                didManualParseChecksFail = true;
-                            }
                         }
                     }
                 }
-
-                // Check for multiple resource paths with and without trailing slashes.
-                // If there are two resource paths with the same name, one with and one without trailing slashes,
-                // it will be considered an error since those are considered as one resource in the API deployment.
-                if (!isValidWithPathsWithTrailingSlashes(null, parseAttemptForV2.getSwagger())) {
-                    errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
-                    didManualParseChecksFail = true;
-                }
             }
-            if (didManualParseChecksFail) { //becomes true only in level 2
+
+            // Check for multiple resource paths with and without trailing slashes.
+            // If there are two resource paths with the same name, one with and one without trailing slashes,
+            // it will be considered an error since those are considered as one resource in the API deployment.
+            if (!isValidWithPathsWithTrailingSlashes(null, parseAttemptForV2.getSwagger())) {
+                errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
+                didManualParseChecksFail = true;
+            }
+
+            if (didManualParseChecksFail) {
                 printErrorCount(errorList);
                 for (int i = 0; i < errorList.size(); i++) {
                     System.out.println("\n" + i+1 + " : " + errorList.get(i));
@@ -333,12 +337,14 @@ public class SwaggerTool {
         }
         if (validationFailedFileCount == 0) {
             if (validationLevel == 1) {
-                log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
+                System.out.println("\n[Swagger file will be accepted by the API Manager 4.2.0 when Relaxed Validation is enabled]");
             } else {
-                log.info("Swagger file will be accepted by the APIM 4.2.0 ");
+                System.out.println("\n[Swagger file will be accepted by the API Manager 4.2.0]");
             }
+        } else {
+            System.out.println("\n[Swagger file will NOT be accepted by the selected validation level of API Manager 4.2.0]");
         }
-        return false;
+        return isSwaggerMissing;
     }
 
 
@@ -442,7 +448,8 @@ public class SwaggerTool {
         ParseOptions options = new ParseOptions();
         options.setResolve(true);
         SwaggerParseResult parseAttemptForV3 = openAPIV3Parser.readContents(apiDefinition, null, options);
-        boolean isMalformedSwagger = parseAttemptForV3.getOpenAPI() == null;
+
+        boolean isOpenAPIMissing = false;
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
         if (parseAttemptForV3.getMessages().size() > 0) {
             for (String message : parseAttemptForV3.getMessages()) {
@@ -451,10 +458,11 @@ public class SwaggerTool {
                     errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
                             .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
                     log.error(errorMessageBuilder.toString());
+                    isOpenAPIMissing = true;
                 }
             }
             if (validationLevel == 1) {
-                if (isMalformedSwagger) {
+                if (parseAttemptForV3.getOpenAPI() == null) {
                     log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                     validationFailedFileCount++;
                 } else {
@@ -486,12 +494,12 @@ public class SwaggerTool {
             // Check for multiple resource paths with and without trailing slashes.
             // If there are two resource paths with the same name, one with and one without trailing slashes,
             // it will be considered an error since those are considered as one resource in the API deployment.
-            if (!isMalformedSwagger) {
+            if (parseAttemptForV3.getOpenAPI() != null) {
                 if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV3.getOpenAPI(), null)) {
                     errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
                 };
             }
-            if (isMalformedSwagger) {
+            if (parseAttemptForV3.getOpenAPI() == null) {
                 log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                 validationFailedFileCount ++;
             } else if (errorList.size() > 0) { // can have only 1 error
@@ -505,12 +513,14 @@ public class SwaggerTool {
         }
         if (validationFailedFileCount == 0) {
             if (validationLevel == 1) {
-                log.info("Swagger file will be accepted by the level 1 validation of APIM 4.0.0 ");
+                System.out.println("\n[Swagger file will be accepted by the API Manager 4.2.0 when Relaxed Validation is enabled]");
             } else {
-                log.info("Swagger file will be accepted by the APIM 4.2.0 ");
+                System.out.println("\n[Swagger file will be accepted by the API Manager 4.2.0]");
             }
+        } else {
+            System.out.println("\n[Swagger file will NOT be accepted by the selected validation level of API Manager 4.2.0]");
         }
-        return false;
+        return isOpenAPIMissing;
     }
 
     private static void printErrorCount(List<String> errorList) {

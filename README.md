@@ -6,7 +6,7 @@ java -jar apim-swagger-validator-1.0.0.jar [<File uri> | <Directory uri> | <Swag
 ```
 
 ##### Validation Levels
-**1** - Verify whether the swagger/openAPI definition is valid as per validation level 1 in APIM 4.0.0.
+**1** - Verify whether the swagger/openAPI definition is valid when relaxed validation in API Manager 4.2.0.
 **2** - Validate as in WSO2 API Manager 4.2.0 and verify whether the swagger/openAPI definition is returned by the validator.
 
 ##### Examples
@@ -40,4 +40,4 @@ When it comes to the outputs, the Following general responses will be returned w
 
 Apart from the above responses, the following response will be returned when the validation level is set to 2(Validate as in WSO2 API Manager 4.2.0).
 
-**Swagger file will be accepted by the APIM 4.2.0** - This will be returned when the provided swagger file has no parsing errors which is caught by the swagger parser. For swagger2.0 it checks for some additional validation like existence of empty resource paths and resource paths with trailing slashes. (But still this will not guarantee that all the functionalities will work)
+**Swagger file will be accepted by the APIM 4.2.0** - This will be returned when the provided swagger file has no parsing errors which is caught by the swagger parser. Apart from that, validator checks for some additional validation like existence of empty resource paths and resource paths with trailing slashes. In this validation level, it is expected that a user will be able to successfully deploy an API in WSO2 API Manager 4.2.0 (But still this will not guarantee that all the functionalities will work)
