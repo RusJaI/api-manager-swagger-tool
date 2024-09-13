@@ -27,7 +27,6 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.swagger.models.HttpMethod;
 import io.swagger.models.Swagger;
-import io.swagger.parser.OpenAPIParser;
 import io.swagger.parser.SwaggerParser;
 import io.swagger.parser.util.SwaggerDeserializationResult;
 import io.swagger.v3.oas.models.OpenAPI;
@@ -58,7 +57,6 @@ public class SwaggerTool {
     static int totalFileCount = 0;
     static int validationFailedFileCount = 0;
     static int validationSuccessFileCount = 0;
-    static List<String> errorList = new ArrayList<String>();
 
     /**
      * @param args 2 parameters are supported when executing the tool.
@@ -229,6 +227,7 @@ public class SwaggerTool {
     }
 
     public static boolean swagger2Validator(String apiDefinition, int validationLevel) {
+        List<String> errorList = new ArrayList<String>();
         SwaggerParser parser = new SwaggerParser();
 
         SwaggerDeserializationResult parseAttemptForV2 = parser.readWithInfo(apiDefinition);
@@ -252,7 +251,7 @@ public class SwaggerTool {
 
             if (validationLevel == 2) {
                 int i = 1;
-                printErrorCount();
+                printErrorCount(errorList);
                 for (String message : errorList) {
                     if (message.contains(Constants.MALFORMED_SWAGGER_ERROR)) {
                         try {
@@ -321,7 +320,7 @@ public class SwaggerTool {
                 }
             }
             if (didManualParseChecksFail) { //becomes true only in level 2
-                printErrorCount();
+                printErrorCount(errorList);
                 for (int i = 0; i < errorList.size(); i++) {
                     System.out.println("\n" + i+1 + " : " + errorList.get(i));
                 }
@@ -438,10 +437,12 @@ public class SwaggerTool {
     }
 
     public static boolean swagger3Validator(String apiDefinition, int validationLevel) {
+        List<String> errorList = new ArrayList<String>();
         OpenAPIV3Parser openAPIV3Parser = new OpenAPIV3Parser();
         ParseOptions options = new ParseOptions();
         options.setResolve(true);
         SwaggerParseResult parseAttemptForV3 = openAPIV3Parser.readContents(apiDefinition, null, options);
+        boolean isMalformedSwagger = parseAttemptForV3.getOpenAPI() == null;
         StringBuilder errorMessageBuilder = new StringBuilder("Invalid OpenAPI, Error Code: ");
         if (parseAttemptForV3.getMessages().size() > 0) {
             for (String message : parseAttemptForV3.getMessages()) {
@@ -450,12 +451,19 @@ public class SwaggerTool {
                     errorMessageBuilder.append(Constants.INVALID_OAS3_FOUND_ERROR_CODE)
                             .append(", Error: ").append(Constants.INVALID_OAS3_FOUND_ERROR_MESSAGE);
                     log.error(errorMessageBuilder.toString());
-                    return true;
                 }
             }
-            if (validationLevel == 2) {
+            if (validationLevel == 1) {
+                if (isMalformedSwagger) {
+                    log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
+                    validationFailedFileCount++;
+                } else {
+                    validationSuccessFileCount++;
+                    log.info("OpenAPI passed with errors, using may lead to functionality issues.");
+                }
+            } else { //validation level 2
                 int i = 1;
-                printErrorCount();
+                printErrorCount(errorList);
                 for (String message : errorList) {
                     if (message.contains(Constants.UNABLE_TO_LOAD_REMOTE_REFERENCE)) {
                         message = logRemoteReferenceIssues(apiDefinition, message);
@@ -473,20 +481,23 @@ public class SwaggerTool {
                 }
                 validationFailedFileCount++;
             }
-            log.info("OpenAPI passed with errors, using may lead to functionality issues.");
         } else {
 
             // Check for multiple resource paths with and without trailing slashes.
             // If there are two resource paths with the same name, one with and one without trailing slashes,
             // it will be considered an error since those are considered as one resource in the API deployment.
-            if (parseAttemptForV3.getOpenAPI() != null) {
+            if (!isMalformedSwagger) {
                 if (!isValidWithPathsWithTrailingSlashes(parseAttemptForV3.getOpenAPI(), null)) {
                     errorList.add("Swagger definition cannot have multiple resource paths with the same name - with and one without trailing slashes");
                 };
             }
-            if (errorList.size() > 0) { // can have only 1 error
-                printErrorCount();
+            if (isMalformedSwagger) {
+                log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
+                validationFailedFileCount ++;
+            } else if (errorList.size() > 0) { // can have only 1 error
+                printErrorCount(errorList);
                 System.out.println("\n1 : " + errorList.get(0));
+                validationFailedFileCount++;
             } else {
                 log.info("Swagger file is valid OpenAPI 3 definition");
                 validationSuccessFileCount++;
@@ -502,7 +513,7 @@ public class SwaggerTool {
         return false;
     }
 
-    private static void printErrorCount() {
+    private static void printErrorCount(List<String> errorList) {
         if (errorList.size() > 0) {
             System.out.println("#### Following " + errorList.size() + " errors found ###");
         }
