@@ -278,7 +278,7 @@ public class SwaggerTool {
                             message = message.replace(Constants.SCHEMA_REF_PATH, "#/definitions/");
                         }
                     }
-                    System.out.println("\n" + i++ + " : " + message);
+                    printError(i++, message);
                 }
                 validationFailedFileCount++;
             }
@@ -326,7 +326,7 @@ public class SwaggerTool {
             if (didManualParseChecksFail) {
                 printErrorCount(errorList);
                 for (int i = 0; i < errorList.size(); i++) {
-                    System.out.println("\n" + i+1 + " : " + errorList.get(i));
+                    printError(i+1, errorList.get(i));
                 }
                 log.error("Malformed OpenAPI, Please fix the listed issues before proceeding");
                 validationFailedFileCount++;
@@ -485,7 +485,7 @@ public class SwaggerTool {
                                     "format $ref: '#/components/schemas/{schemaName}'");
                         }
                     }
-                    System.out.println("\n" + i++ + " : " + message);
+                    printError(i++, message);
                 }
                 validationFailedFileCount++;
             }
@@ -504,7 +504,7 @@ public class SwaggerTool {
                 validationFailedFileCount ++;
             } else if (errorList.size() > 0) { // can have only 1 error
                 printErrorCount(errorList);
-                System.out.println("\n1 : " + errorList.get(0));
+                printError(1, errorList.get(0));
                 validationFailedFileCount++;
             } else {
                 log.info("Swagger file is valid OpenAPI 3 definition");
@@ -525,9 +525,16 @@ public class SwaggerTool {
 
     private static void printErrorCount(List<String> errorList) {
         if (errorList.size() > 0) {
-            System.out.println("#### Following " + errorList.size() + " errors found ###");
+            System.out.println("#### Following " + errorList.size() + " errors found ###\n");
+            System.out.format("%-8s%-12s%n", "ID", "Error Message");
+            System.out.println("-------------------------------------------------------");
         }
     }
+
+    private static void printError(int id, String message) {
+        System.out.format("%-8d%-12s%n", id, message);
+    }
+
     /**
      * This method will log the remote references in the given Swagger or OpenAPI definition.
      * @param apiDefinition Swagger or OpenAPI definition
