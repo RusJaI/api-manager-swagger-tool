@@ -128,8 +128,7 @@ public class SwaggerTool {
 
         if (swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR) && swaggerTypeAndName.size() == 1) {
             return;
-        } else if (swaggerTypeAndName.size() == 2 && swaggerTypeAndName.get(0).equals(Constants.SwaggerVersion.ERROR)
-                && swaggerTypeAndName.get(1).equals(Constants.TITLE_NULL)) {
+        } else if (swaggerTypeAndName.size() == 2 && swaggerTypeAndName.get(1).equals(Constants.TITLE_NULL)) {
             return;
         }
         else {
