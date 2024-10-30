@@ -7,18 +7,18 @@ java -jar apim-swagger-validator-1.0.0.jar [<File uri> | <Directory uri> | <Swag
 
 ##### Validation Levels
 **1** - Verify whether the swagger/openAPI definition is valid when relaxed validation in API Manager 4.2.0.
-**2** - Validate as in WSO2 API Manager 4.2.0 and verify whether the swagger/openAPI definition is returned by the validator.
+**2** - Validate as in WSO2 API Manager 4.2.0 default backend validation.
 
 ##### Examples
 
 - Use with a single swagger File
 
    ```bash
-   java -jar apim-swagger-validator-1.0.0.jar location:/Users/xyz/swagger-definitions/swagger.json 0
+   java -jar apim-swagger-validator-1.0.0.jar location:/Users/xyz/swagger-definitions/swagger.json 2
    ```
 - Use with a folder
     ```bash
-    java -jar apim-swagger-validator-1.0.0.jar location:/Users/xyz/swagger-definitions 1
+    java -jar apim-swagger-validator-1.0.0.jar location:/Users/xyz/swagger-definitions 2
     ```
 - Use with a inline definition
 
